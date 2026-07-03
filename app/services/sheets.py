@@ -1,11 +1,13 @@
 """Google Sheets register service.
 
 Appends one row per saved letter with these columns:
-  SL No. | Date | From whom received | Letter No. | Letter Date | Subject | Disposal
+  SL No. | Date | From whom received | Letter No. | Letter Date | Subject | Disposal | PDF Link
 
 SL No. auto-increments as BEP/UP001, BEP/UP002, ...
 Date is the scan/save date (today).
 Disposal is left empty for the user to fill in Excel.
+PDF Link is the Drive webViewLink for the scanned document (empty if the
+Drive upload failed — see documents.py's save flow).
 All other fields come from the reviewed extraction.
 """
 from __future__ import annotations
@@ -17,7 +19,7 @@ from pathlib import Path
 from app.config import settings
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-HEADER_ROW = ["SL No.", "Date", "From whom received", "Letter No.", "Letter Date", "Subject", "Disposal"]
+HEADER_ROW = ["SL No.", "Date", "From whom received", "Letter No.", "Letter Date", "Subject", "Disposal", "PDF Link"]
 # ponytail: 3-digit zero-pad; after 999 it naturally becomes 4 digits — fine for a single office.
 SL_NO_RE = re.compile(r"(\d+)$")
 
@@ -39,7 +41,7 @@ def ensure_header() -> None:
     """Write the header row if the sheet's first row is empty or mismatched."""
     svc = _service()
     resp = svc.spreadsheets().values().get(
-        spreadsheetId=settings.SHEET_ID, range="A1:G1"
+        spreadsheetId=settings.SHEET_ID, range="A1:H1"
     ).execute()
     values = resp.get("values", [])
     if values and values[0] == HEADER_ROW:
@@ -92,11 +94,13 @@ def append_register_row(
     letter_date: str = "",
     subject: str = "",
     scan_date: str | None = None,
+    pdf_link: str = "",
 ) -> str:
     """Append one register row. Returns the generated SL No.
 
     All fields are the final reviewed values from the extraction review screen.
-    scan_date defaults to today (DD-MM-YYYY).
+    scan_date defaults to today (DD-MM-YYYY). pdf_link is the Drive
+    webViewLink — left blank if the Drive upload failed or hasn't run.
     """
     ensure_header()
     svc = _service()
@@ -113,11 +117,12 @@ def append_register_row(
         _as_text(letter_date),
         subject,
         "",
+        pdf_link,
     ]
 
     svc.spreadsheets().values().append(
         spreadsheetId=settings.SHEET_ID,
-        range="A:G",
+        range="A:H",
         valueInputOption="USER_ENTERED",
         insertDataOption="INSERT_ROWS",
         body={"values": [row]},

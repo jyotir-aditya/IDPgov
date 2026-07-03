@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from googleapiclient.errors import HttpError
 
 from app.auth import verify_token
 from app.db import TMP_DIR, get_db
@@ -199,17 +198,17 @@ async def save_document(
     drive_url = row["drive_url"]
     local_path = row["local_pdf_path"]
 
-    # Drive upload (skip if already done)
+    # R2 upload (skip if already done)
     if not drive_file_id and local_path and Path(local_path).exists():
         try:
             # Filename: {letter_no}_{date}_{id}.pdf
             safe_no = fields.letter_number.replace("/", "-").replace("\\", "-") or "unknown"
             filename = f"{safe_no}_{fields.letter_date}_{doc_id[:8]}.pdf"
-            from app.services.drive import upload_pdf
+            from app.services.r2 import upload_pdf
             drive_file_id, drive_url = upload_pdf(local_path, filename)
         except Exception:
-            # Drive failure doesn't block save — user can retry
-            logger.exception("Drive upload failed for document %s", doc_id)
+            # Upload failure doesn't block save — user can retry
+            logger.exception("PDF upload failed for document %s", doc_id)
             drive_url = None
 
     # Sheet append
@@ -222,6 +221,7 @@ async def save_document(
             letter_no=fields.letter_number,
             letter_date=fields.letter_date,
             subject=fields.subject,
+            pdf_link=drive_url or "",
         )
         sheet_appended = True
     except Exception:
@@ -232,6 +232,7 @@ async def save_document(
             "letter_no": fields.letter_number,
             "letter_date": fields.letter_date,
             "subject": fields.subject,
+            "pdf_link": drive_url or "",
         }, ensure_ascii=False)
         db.execute(
             "INSERT INTO pending_sheet_rows (document_id, row_json, created_at) VALUES (?, ?, ?)",

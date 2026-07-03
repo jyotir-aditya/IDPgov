@@ -38,6 +38,7 @@ def flush_pending_sheet_rows() -> None:
                 letter_no=data.get("letter_no", ""),
                 letter_date=data.get("letter_date", ""),
                 subject=data.get("subject", ""),
+                pdf_link=data.get("pdf_link", ""),
             )
             db.execute("DELETE FROM pending_sheet_rows WHERE id = ?", (row["id"],))
             db.execute(
