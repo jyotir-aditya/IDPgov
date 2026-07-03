@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Letter Register — Test Page</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+  h1 { color: #333; }
+  h2 { border-bottom: 2px solid #4CAF50; padding-bottom: 5px; margin-top: 30px; }
+  .card { background: white; padding: 15px; border-radius: 8px; margin: 10px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  input, button, textarea { padding: 8px; margin: 5px 0; font-size: 14px; }
+  input[type=text], input[type=file], textarea { width: 100%; box-sizing: border-box; }
+  button { background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; padding: 10px 20px; }
+  button:hover { background: #45a049; }
+  button:disabled { background: #ccc; cursor: not-allowed; }
+  pre { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 13px; }
+  .field-row { display: flex; gap: 10px; align-items: center; margin: 5px 0; }
+  .field-row label { min-width: 140px; font-weight: bold; }
+  .field-row input { flex: 1; }
+  .candidates { font-size: 12px; color: #666; margin-left: 145px; }
+  .candidate { padding: 2px 0; }
+  .candidate select { width: 100%; padding: 4px; }
+  .confidence-low { border-color: #ff9800 !important; border-width: 2px; }
+  .status-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+  .status-draft { background: #fff3cd; color: #856404; }
+  .status-saved { background: #d4edda; color: #155724; }
+  #docId { font-family: monospace; font-size: 12px; color: #666; }
+</style>
+</head>
+<body>
+<h1>AI Government Letter Register — Test Page</h1>
+
+<h2>1. Configuration</h2>
+<div class="card">
+  <label>API Token:</label>
+  <input type="text" id="token" placeholder="Enter API bearer token" value="">
+  <br>
+  <small>Token is sent as <code>Authorization: Bearer <token></code></small>
+</div>
+
+<h2>2. Upload & Extract</h2>
+<div class="card">
+  <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png">
+  <br>
+  <button id="uploadBtn" onclick="uploadFile()">Upload & Extract</button>
+  <div id="uploadStatus"></div>
+</div>
+
+<h2>3. Review & Save</h2>
+<div class="card" id="reviewCard" style="display:none;">
+  <p>Document ID: <span id="docId"></span></p>
+  <p>Confidence: <span id="confidence"></span></p>
+  <div id="fieldsContainer"></div>
+  <br>
+  <button onclick="saveDocument()">Save to Drive + Sheet</button>
+  <div id="saveStatus"></div>
+</div>
+
+<h2>4. Search</h2>
+<div class="card">
+  <input type="text" id="searchQuery" placeholder="Search letter number, subject, sender...">
+  <button onclick="searchDocs()">Search</button>
+  <div id="searchResults"></div>
+</div>
+
+<h2>5. Recent Documents</h2>
+<div class="card">
+  <button onclick="loadRecent()">Load Recent</button>
+  <div id="recentList"></div>
+</div>
+
+<h2>Raw JSON Output</h2>
+<pre id="rawOutput">Upload a file to see results...</pre>
+
+<script>
+function getToken() { return document.getElementById('token').value; }
+function setRaw(obj) { document.getElementById('rawOutput').textContent = JSON.stringify(obj, null, 2); }
+
+let currentDocId = null;
+let currentExtraction = null;
+
+async function uploadFile() {
+  const fileInput = document.getElementById('fileInput');
+  if (!fileInput.files[0]) { alert('Select a file first'); return; }
+  const token = getToken();
+  if (!token) { alert('Enter API token first'); return; }
+
+  const btn = document.getElementById('uploadBtn');
+  btn.disabled = true; btn.textContent = 'Uploading & extracting...';
+  document.getElementById('uploadStatus').innerHTML = '<p>AI पढ़ रहा है… / AI is reading…</p>';
+
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+
+  try {
+    const resp = await fetch('/api/documents', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token },
+      body: formData,
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(JSON.stringify(data));
+
+    currentDocId = data.id;
+    currentExtraction = data.extraction;
+    setRaw(data);
+
+    document.getElementById('docId').textContent = data.id;
+    document.getElementById('confidence').textContent = (data.confidence * 100).toFixed(1) + '%';
+    document.getElementById('uploadStatus').innerHTML = '<p style="color:green;">✓ Extraction complete</p>';
+    renderFields(data.extraction);
+    document.getElementById('reviewCard').style.display = 'block';
+  } catch (e) {
+    document.getElementById('uploadStatus').innerHTML = '<p style="color:red;">Error: ' + e.message + '</p>';
+    setRaw({ error: e.message });
+  }
+  btn.disabled = false; btn.textContent = 'Upload & Extract';
+}
+
+function renderFields(extraction) {
+  const container = document.getElementById('fieldsContainer');
+  container.innerHTML = '';
+  const fieldLabels = {
+    letter_number: 'पत्रांक / Letter No.',
+    letter_date: 'तिथि / Letter Date',
+    subject: 'विषय / Subject',
+    received_from: 'प्रेषक / From whom received',
+  };
+  for (const [name, label] of Object.entries(fieldLabels)) {
+    const field = extraction.fields[name];
+    if (!field) continue;
+    const lowConf = field.confidence < 0.7;
+    const candidates = field.candidates || [];
+
+    const row = document.createElement('div');
+    row.className = 'field-row';
+
+    const lbl = document.createElement('label');
+    lbl.textContent = label;
+    row.appendChild(lbl);
+
+    if (candidates.length > 1) {
+      const select = document.createElement('select');
+      select.id = 'field_' + name;
+      select.className = lowConf ? 'confidence-low' : '';
+      select.style.flex = '1';
+      candidates.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.value;
+        const pos = c.position && c.position !== 'UNKNOWN' ? ' [' + c.position + ']' : '';
+        opt.textContent = c.value + pos + (c.reason ? ' — ' + c.reason : '');
+        select.appendChild(opt);
+      });
+      const other = document.createElement('option');
+      other.value = '__other__';
+      other.textContent = 'अन्य / Other...';
+      select.appendChild(other);
+      select.value = field.value;
+      select.onchange = function() {
+        if (this.value === '__other__') {
+          const inp = document.createElement('input');
+          inp.type = 'text'; inp.id = 'field_' + name; inp.value = field.value;
+          inp.className = lowConf ? 'confidence-low' : '';
+          this.parentNode.replaceChild(inp, this);
+          inp.focus();
+        }
+      };
+      row.appendChild(select);
+    } else {
+      const inp = document.createElement('input');
+      inp.type = 'text'; inp.id = 'field_' + name;
+      inp.value = field.value;
+      inp.className = lowConf ? 'confidence-low' : '';
+      row.appendChild(inp);
+    }
+
+    container.appendChild(row);
+
+    if (lowConf) {
+      const warn = document.createElement('div');
+      warn.className = 'candidates';
+      warn.style.color = '#ff9800';
+      warn.textContent = '⚠ Low confidence (' + (field.confidence * 100).toFixed(0) + '%)';
+      container.appendChild(warn);
+    }
+  }
+}
+
+async function saveDocument() {
+  if (!currentDocId) return;
+  const token = getToken();
+
+  const getVal = (name) => {
+    const el = document.getElementById('field_' + name);
+    return el ? el.value : '';
+  };
+
+  const body = {
+    letter_number: getVal('letter_number'),
+    letter_date: getVal('letter_date'),
+    subject: getVal('subject'),
+    received_from: getVal('received_from'),
+  };
+
+  try {
+    const resp = await fetch('/api/documents/' + currentDocId + '/save', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(JSON.stringify(data));
+
+    setRaw(data);
+    let html = '<p style="color:green;">✓ Saved!</p>';
+    html += '<p>Status: ' + data.status + '</p>';
+    if (data.drive_url) html += '<p>Drive: <a href="' + data.drive_url + '" target="_blank">' + data.drive_url + '</a></p>';
+    html += '<p>Sheet appended: ' + data.sheet_appended + '</p>';
+    if (data.sl_no) html += '<p>SL No: ' + data.sl_no + '</p>';
+    document.getElementById('saveStatus').innerHTML = html;
+  } catch (e) {
+    document.getElementById('saveStatus').innerHTML = '<p style="color:red;">Error: ' + e.message + '</p>';
+  }
+}
+
+async function searchDocs() {
+  const q = document.getElementById('searchQuery').value;
+  if (!q) return;
+  const token = getToken();
+  try {
+    const resp = await fetch('/api/search?q=' + encodeURIComponent(q), {
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(JSON.stringify(data));
+    setRaw(data);
+    let html = '<p>Found ' + data.total + ' results</p>';
+    data.results.forEach(r => {
+      html += '<div class="card"><b>' + (r.letter_number || 'No number') + '</b> — ' + (r.subject || 'No subject') + ' <span class="status-badge status-' + r.status + '">' + r.status + '</span></div>';
+    });
+    document.getElementById('searchResults').innerHTML = html;
+  } catch (e) {
+    document.getElementById('searchResults').innerHTML = '<p style="color:red;">Error: ' + e.message + '</p>';
+  }
+}
+
+async function loadRecent() {
+  const token = getToken();
+  try {
+    const resp = await fetch('/api/documents?limit=10', {
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(JSON.stringify(data));
+    let html = '';
+    if (data.length === 0) { html = '<p>No documents yet</p>'; }
+    data.forEach(r => {
+      html += '<div class="card"><b>' + (r.letter_number || 'No number') + '</b> — ' + (r.subject || 'No subject') + ' <span class="status-badge status-' + r.status + '">' + r.status + '</span><br><small>' + r.id + '</small></div>';
+    });
+    document.getElementById('recentList').innerHTML = html;
+  } catch (e) {
+    document.getElementById('recentList').innerHTML = '<p style="color:red;">Error: ' + e.message + '</p>';
+  }
+}
+</script>
+</body>
+</html>
