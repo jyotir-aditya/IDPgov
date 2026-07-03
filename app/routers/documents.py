@@ -10,6 +10,7 @@ GET  /api/search           — FTS5 search + date range
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +33,7 @@ from app.models import (
 from app.services.extraction.factory import get_provider
 
 router = APIRouter(prefix="/api", tags=["documents"])
+logger = logging.getLogger("documents")
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
@@ -205,8 +207,9 @@ async def save_document(
             filename = f"{safe_no}_{fields.letter_date}_{doc_id[:8]}.pdf"
             from app.services.drive import upload_pdf
             drive_file_id, drive_url = upload_pdf(local_path, filename)
-        except Exception as e:
+        except Exception:
             # Drive failure doesn't block save — user can retry
+            logger.exception("Drive upload failed for document %s", doc_id)
             drive_url = None
 
     # Sheet append
@@ -222,6 +225,7 @@ async def save_document(
         )
         sheet_appended = True
     except Exception:
+        logger.exception("Sheet append failed for document %s, enqueueing for retry", doc_id)
         # Enqueue for retry
         row_json = json.dumps({
             "received_from": fields.received_from or fields.sender_name,
