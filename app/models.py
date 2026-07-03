@@ -76,3 +76,13 @@ class SearchResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     db: bool
+
+
+class SlNoConfig(BaseModel):
+    prefix: str = "BEP/UP"
+    start_number: int = Field(1, ge=1)
+    padding: int = Field(3, ge=1, le=6)
+
+
+class SlNoConfigOut(SlNoConfig):
+    next_preview: str

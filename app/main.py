@@ -12,6 +12,7 @@ import asyncio
 
 from app.db import init_db
 from app.routers.documents import router as documents_router
+from app.routers.settings import router as settings_router
 from app.services.retry import retry_loop
 
 
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI Government Letter Register", lifespan=lifespan)
 app.include_router(documents_router)
+app.include_router(settings_router)
 
 # Serve static files (test page)
 STATIC_DIR = Path(__file__).parent / "static"

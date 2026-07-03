@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS pending_sheet_rows (
     created_at TEXT NOT NULL
 );
 
+-- Single-row table: SL No. numbering, editable from the app's Settings
+-- screen (not just .env) so office staff can change it without server
+-- access. prefix/padding apply to the NEXT generated number only — existing
+-- sheet rows are never rewritten. Seeded in init_db() from SL_NO_PREFIX.
+CREATE TABLE IF NOT EXISTS sl_no_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    prefix TEXT NOT NULL DEFAULT '',
+    start_number INTEGER NOT NULL DEFAULT 1,
+    padding INTEGER NOT NULL DEFAULT 3
+);
+
 -- FTS5 over searchable fields (unicode61 handles Devanagari)
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
     letter_number, subject, sender_name, department, keywords, ocr_text,
@@ -84,5 +95,9 @@ def init_db() -> None:
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.executescript(SCHEMA)
+    conn.execute(
+        "INSERT OR IGNORE INTO sl_no_config (id, prefix, start_number, padding) VALUES (1, ?, 1, 3)",
+        (settings.SL_NO_PREFIX,),
+    )
     conn.commit()
     conn.close()
